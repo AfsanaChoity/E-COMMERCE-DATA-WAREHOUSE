@@ -1,0 +1,276 @@
+// =====================================================================
+// MICROSOFT POWER BI: COMPLETE DAX MEASURES LIBRARY
+// Project: E-Commerce Data Warehouse (Olist Brazilian E-Commerce)
+// Underlying Engine: MySQL Data Warehouse (Star Schema & Views)
+// File: power_bi_dax_measures.dax
+// =====================================================================
+// Best Practice: Create a dedicated disconnected table named '_Measures'
+// in Power BI Desktop to house all calculated measures in organized display folders.
+// =====================================================================
+
+// =====================================================================
+// SECTION 1: CORE SALES & REVENUE MEASURES
+// Used across Page 1 (Executive), Page 2 (Sales Analysis), Page 3 (Products)
+// =====================================================================
+
+[Total Sales] = 
+SUM(fact_sales[price])
+// Description: Total item merchandise sales revenue excluding freight.
+// Format: Currency ($ or R$) with 2 decimal places.
+
+[Total Freight] = 
+SUM(fact_sales[freight_value])
+// Description: Total shipping and freight fees collected.
+
+[Gross Merchandise Value (GMV)] = 
+[Total Sales] + [Total Freight]
+// Description: Combined gross transacted volume (items + freight).
+
+[Total Orders] = 
+DISTINCTCOUNT(fact_sales[order_id])
+// Description: Total count of unique completed purchase orders.
+
+[Total Items Sold] = 
+COUNTROWS(fact_sales)
+// Description: Total quantity of individual order line items transacted.
+
+[Average Order Value (AOV)] = 
+DIVIDE([Total Sales], [Total Orders], 0)
+// Description: Average revenue generated per distinct customer order.
+
+[Average Item Price] = 
+DIVIDE([Total Sales], [Total Items Sold], 0)
+// Description: Average unit sales price across catalog SKUs.
+
+[Average Customer Rating] = 
+AVERAGE(fact_sales[review_score])
+// Description: Mean customer satisfaction score from 1.00 to 5.00.
+
+
+// =====================================================================
+// SECTION 2: TIME INTELLIGENCE & MOM / YOY MEASURES
+// Used in Page 1 (Monthly Trend) and Page 2 (Sales Analysis)
+// Requires: Active 1:N relationship between dim_date[date_key] and fact_sales[date_key]
+// =====================================================================
+
+[Sales Previous Month] = 
+CALCULATE(
+    [Total Sales],
+    DATEADD(dim_date[full_date], -1, MONTH)
+)
+// Description: Sales revenue transacted in the prior calendar month.
+
+[MoM Sales Growth %] = 
+VAR CurrentSales = [Total Sales]
+VAR PreviousMonthSales = [Sales Previous Month]
+RETURN
+DIVIDE(
+    CurrentSales - PreviousMonthSales,
+    PreviousMonthSales,
+    0
+)
+// Description: Month-over-Month percentage revenue expansion/contraction.
+// Format: Percentage (0.0%).
+
+[Sales Previous Year] = 
+CALCULATE(
+    [Total Sales],
+    SAMEPERIODLASTYEAR(dim_date[full_date])
+)
+// Description: Sales revenue transacted in the identical period of the previous calendar year.
+
+[YoY Sales Growth %] = 
+VAR CurrentSales = [Total Sales]
+VAR PreviousYearSales = [Sales Previous Year]
+RETURN
+DIVIDE(
+    CurrentSales - PreviousYearSales,
+    PreviousYearSales,
+    0
+)
+// Description: Year-over-Year percentage revenue growth.
+
+[Quarterly Revenue] = 
+CALCULATE(
+    [Total Sales],
+    ALLEXCEPT(dim_date, dim_date[year], dim_date[quarter])
+)
+// Description: Total sales partitioned by calendar quarter.
+
+[Yearly Revenue] = 
+CALCULATE(
+    [Total Sales],
+    ALLEXCEPT(dim_date, dim_date[year])
+)
+// Description: Total sales aggregated per calendar year.
+
+
+// =====================================================================
+// SECTION 3: CUSTOMER INTELLIGENCE & RETENTION MEASURES
+// Used in Page 1 (Executive KPIs) and Page 4 (Customer Analysis)
+// =====================================================================
+
+[Total Customers] = 
+DISTINCTCOUNT(dim_customer[customer_unique_id])
+// Description: Count of distinct human buyers registered in the data warehouse.
+
+[New Customers] = 
+CALCULATE(
+    [Total Customers],
+    FILTER(
+        vw_customer_behavior,
+        vw_customer_behavior[customer_retention_type] = "One-Time Customer"
+    )
+)
+// Description: Customers with exactly 1 historical transaction.
+
+[Returning Customers] = 
+CALCULATE(
+    [Total Customers],
+    FILTER(
+        vw_customer_behavior,
+        vw_customer_behavior[customer_retention_type] = "Returning Customer"
+    )
+)
+// Description: Customers who made 2 or more distinct orders over their lifetime.
+
+[Returning Customer Rate] = 
+DIVIDE([Returning Customers], [Total Customers], 0)
+// Description: Percentage of total customer base who are repeat buyers.
+// Format: Percentage (0.0%).
+
+[Average Orders per Customer] = 
+DIVIDE([Total Orders], [Total Customers], 0)
+// Description: Purchase frequency index per registered customer.
+
+[Customer Lifetime Spend (Avg)] = 
+DIVIDE([Total Sales], [Total Customers], 0)
+// Description: Mean customer lifetime value (LTV).
+
+
+// =====================================================================
+// SECTION 4: PRODUCT & CATEGORY PERFORMANCE MEASURES
+// Used in Page 1 (Top 10 Products, Category Share) and Page 3 (Product Analysis)
+// =====================================================================
+
+[Category Sales] = 
+CALCULATE(
+    [Total Sales],
+    ALLEXCEPT(dim_product, dim_product[product_category_name_english])
+)
+// Description: Sales volume rolled up by product category.
+
+[Category Sales Share %] = 
+DIVIDE(
+    [Total Sales],
+    CALCULATE([Total Sales], ALL(dim_product)),
+    0
+)
+// Description: Percentage share of total enterprise revenue contributed by category.
+
+[Top Products Revenue Rank] = 
+RANKX(
+    ALL(dim_product[product_id]),
+    [Total Sales],
+    ,
+    DESC,
+    Dense
+)
+// Description: Dynamic ordinal ranking of products based on sales revenue.
+
+[Top 10 Products Filter] = 
+IF([Top Products Revenue Rank] <= 10, 1, 0)
+// Description: Binary flag for Top 10 Product visual filter in Power BI.
+
+
+// =====================================================================
+// SECTION 5: REGIONAL & LOGISTICS PERFORMANCE MEASURES
+// Used in Page 1 (Sales by State), Page 2, Page 5 (Regional Analysis)
+// =====================================================================
+
+[Sales by State] = 
+CALCULATE(
+    [Total Sales],
+    ALLEXCEPT(dim_location, dim_location[geolocation_state])
+)
+// Description: Total revenue aggregated by Brazilian federative state.
+
+[Average Freight per Order] = 
+DIVIDE([Total Freight], [Total Orders], 0)
+// Description: Mean freight tariff paid per shipment order.
+
+[Freight to Sales Ratio %] = 
+DIVIDE([Total Freight], [Total Sales], 0)
+// Description: Proportion of shipping cost relative to merchandise price.
+
+
+// =====================================================================
+// SECTION 6: DELIVERY & SLA PERFORMANCE MEASURES
+// Used in Page 1 (Order Status) and Page 6 (Delivery & Order Analysis)
+// Derived from: vw_order_performance
+// =====================================================================
+
+[Delivered Orders Count] = 
+CALCULATE(
+    [Total Orders],
+    vw_order_performance[order_status] = "delivered"
+)
+// Description: Count of successfully delivered orders.
+
+[Canceled Orders Count] = 
+CALCULATE(
+    [Total Orders],
+    vw_order_performance[order_status] = "canceled"
+)
+// Description: Count of voided/canceled transactions.
+
+[Order Cancellation Rate %] = 
+DIVIDE([Canceled Orders Count], [Total Orders], 0)
+// Description: Share of orders that were canceled.
+
+[Average Delivery Time (Days)] = 
+AVERAGE(vw_order_performance[actual_delivery_days])
+// Description: Average transit time in calendar days between purchase and delivery.
+
+[Estimated Delivery Time (Days)] = 
+AVERAGE(vw_order_performance[estimated_delivery_days])
+// Description: Average carrier SLA promised delivery window.
+
+[Average Delivery Delay (Days)] = 
+AVERAGE(vw_order_performance[delivery_delay_days])
+// Description: Average variance days past promised estimated delivery deadline.
+
+[On-Time Orders Count] = 
+CALCULATE(
+    [Total Orders],
+    vw_order_performance[delivery_sla_status] = "On-Time Delivery"
+)
+// Description: Orders delivered on or before the carrier estimated delivery date.
+
+[Delayed Orders Count] = 
+CALCULATE(
+    [Total Orders],
+    vw_order_performance[delivery_sla_status] = "Delayed Delivery"
+)
+// Description: Orders delivered past the promised estimated delivery date.
+
+[On-Time Delivery Rate %] = 
+VAR ValidDeliveries = 
+    CALCULATE(
+        [Total Orders],
+        NOT(ISBLANK(vw_order_performance[actual_delivery_days]))
+    )
+RETURN
+DIVIDE([On-Time Orders Count], ValidDeliveries, 0)
+// Description: Percentage of completed deliveries that satisfied carrier SLA.
+// Format: Percentage (0.0%).
+
+[Delayed Delivery Rate %] = 
+VAR ValidDeliveries = 
+    CALCULATE(
+        [Total Orders],
+        NOT(ISBLANK(vw_order_performance[actual_delivery_days]))
+    )
+RETURN
+DIVIDE([Delayed Orders Count], ValidDeliveries, 0)
+// Description: Percentage of deliveries that exceeded SLA threshold.
